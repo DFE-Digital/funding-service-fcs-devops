@@ -1,0 +1,60 @@
+
+trigger: none
+
+variables:
+- group: FCS-SQL-Firewall
+
+#schedules:
+#- cron: "0 3 * * 0"
+#  displayName: Weekly SQL Firewall Update
+#  branches:
+#    include:
+#      - main
+#  always: true
+
+pool:
+  vmImage: windows-latest
+
+stages:
+
+- stage: Dev
+  jobs:
+  - job: UpdateFirewall
+    steps:
+    - template: ../templates/update-firewall.yml
+      parameters:
+        azureSubscription: '$(DevAzureSubscription)'
+        subscriptionId: '$(DevSubscriptionId)'
+        resourceGroupName: '$(DevResourceGroupName)'
+        sqlServerName: '$(DevSqlServerName)'
+        location: '$(Location)'
+        serviceTag: '$(ServiceTag)'
+        rulePrefix: '$(DevRulePrefix)'
+
+- stage: PreProd
+  jobs:
+  - job: UpdateFirewall
+    steps:
+    - template: ../templates/update-firewall.yml
+      parameters:
+        azureSubscription: '$(PreProdAzureSubscription)'
+        subscriptionId: '$(PreProdSubscriptionId)'
+        resourceGroupName: '$(PreProdResourceGroupName)'
+        sqlServerName: '$(PreProdSqlServerName)'
+        location: '$(Location)'
+        serviceTag: '$(ServiceTag)'
+        rulePrefix: '$(PreProdRulePrefix)'
+
+- stage: Prod
+  jobs:
+  - job: UpdateFirewall
+    steps:
+    - template: ../templates/update-firewall.yml
+      parameters:
+        azureSubscription: '$(ProdAzureSubscription)'
+        subscriptionId: '$(ProdSubscriptionId)'
+        resourceGroupName: '$(ProdResourceGroupName)'
+        sqlServerName: '$(ProdSqlServerName)'
+        location: '$(Location)'
+        serviceTag: '$(ServiceTag)'
+        rulePrefix: '$(ProdRulePrefix)'

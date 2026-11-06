@@ -1,0 +1,139 @@
+parameters:
+- name: azureSubscription
+  type: string
+
+- name: subscriptionId
+  type: string
+
+- name: resourceGroupName
+  type: string
+
+- name: sqlServerName
+  type: string
+
+- name: location
+  type: string
+
+- name: serviceTag
+  type: string
+
+- name: rulePrefix
+  type: string
+
+steps:
+
+- task: AzurePowerShell@5
+  displayName: 'Update Azure SQL Firewall Rules'
+  inputs:
+    azureSubscription: ${{ parameters.azureSubscription }}
+    ScriptType: InlineScript
+    azurePowerShellVersion: LatestVersion
+    pwsh: true
+    Inline: |
+
+      function Convert-CidrToRange {
+          param([string]$CIDR)
+
+          $network, $prefix = $CIDR.Split('/')
+
+          $ipBytes = [System.Net.IPAddress]::Parse($network).GetAddressBytes()
+          [Array]::Reverse($ipBytes)
+
+          $ip = [BitConverter]::ToUInt32($ipBytes,0)
+
+          $mask = [uint32]([math]::Pow(2,32) - [math]::Pow(2,(32-[int]$prefix)))
+
+          $networkAddress = $ip -band $mask
+          $broadcast = $networkAddress + ([math]::Pow(2,(32-[int]$prefix))-1)
+
+          function ConvertToIP([uint32]$value)
+          {
+              $bytes = [BitConverter]::GetBytes($value)
+              [Array]::Reverse($bytes)
+              ([System.Net.IPAddress]$bytes).ToString()
+          }
+
+          @{
+              Start = ConvertToIP $networkAddress
+              End   = ConvertToIP $broadcast
+          }
+      }
+
+      Write-Host "=================================================="
+      Write-Host "Azure SQL Firewall Update"
+      Write-Host "=================================================="
+
+      Write-Host "Subscription      : ${{ parameters.subscriptionId }}"
+      Write-Host "Resource Group    : ${{ parameters.resourceGroupName }}"
+      Write-Host "SQL Server        : ${{ parameters.sqlServerName }}"
+      Write-Host "Location          : ${{ parameters.location }}"
+      Write-Host "Service Tag       : ${{ parameters.serviceTag }}"
+      Write-Host "Rule Prefix       : ${{ parameters.rulePrefix }}"
+
+      Set-AzContext -SubscriptionId "${{ parameters.subscriptionId }}" | Out-Null
+
+      Write-Host ""
+      Write-Host "Retrieving Service Tag..."
+
+      $serviceTags = Get-AzNetworkServiceTag -Location "${{ parameters.location }}"
+
+      $tag = $serviceTags.Values | Where-Object Name -eq "${{ parameters.serviceTag }}"
+
+      if (-not $tag)
+      {
+          throw "Service Tag '${{ parameters.serviceTag }}' not found."
+      }
+
+      Write-Host ""
+      Write-Host "Removing existing firewall rules..."
+
+      $existingRules = Get-AzSqlServerFirewallRule `
+          -ResourceGroupName "${{ parameters.resourceGroupName }}" `
+          -ServerName "${{ parameters.sqlServerName }}" |
+          Where-Object FirewallRuleName -like "${{ parameters.rulePrefix }}*"
+
+      foreach($rule in $existingRules)
+      {
+          Write-Host "Removing $($rule.FirewallRuleName)"
+
+          Remove-AzSqlServerFirewallRule `
+              -ResourceGroupName "${{ parameters.resourceGroupName }}" `
+              -ServerName "${{ parameters.sqlServerName }}" `
+              -FirewallRuleName $rule.FirewallRuleName `
+              -Force
+      }
+
+      Write-Host ""
+      Write-Host "Creating new firewall rules..."
+
+      $count = 1
+      $created = 0
+
+      foreach($cidr in $tag.Properties.AddressPrefixes)
+      {
+          # Ignore IPv6 ranges
+          if($cidr -notmatch ":")
+          {
+              $range = Convert-CidrToRange $cidr
+
+              $ruleName = "{0}{1:d2}" -f "${{ parameters.rulePrefix }}", $count
+
+              Write-Host "Creating $ruleName : $($range.Start) - $($range.End)"
+
+              New-AzSqlServerFirewallRule `
+                  -ResourceGroupName "${{ parameters.resourceGroupName }}" `
+                  -ServerName "${{ parameters.sqlServerName }}" `
+                  -FirewallRuleName $ruleName `
+                  -StartIpAddress $range.Start `
+                  -EndIpAddress $range.End
+
+              $count++
+              $created++
+          }
+      }
+
+      Write-Host ""
+      Write-Host "=================================================="
+      Write-Host "Completed successfully."
+      Write-Host "Firewall rules created: $created"
+      Write-Host "=================================================="

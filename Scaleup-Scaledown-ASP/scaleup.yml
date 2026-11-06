@@ -1,0 +1,49 @@
+
+trigger: none  # Schedule or manual run
+
+variables:
+- group: FCS-Dev-AppService-Scaling
+
+stages:
+- stage: ScaleAppServices
+  displayName: "Scale-up App Service Plan - Dev"
+  jobs:
+
+    # ---------------- DEV ----------------
+    - deployment: ScaleAppServiceDev
+      displayName: "Scale-up App Service Plan - Dev"
+      environment: "$(DevEnvironment)"
+
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - task: AzureCLI@2
+              displayName: "Scale Dev App Service Plan"
+              inputs:
+                azureSubscription: $(DevServiceConnection)
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: |
+                  echo "Scaling Dev App Service Plan: $(DevPlan1Name)"
+                  echo "Plan: $(DevPlan1Name)"
+                  echo "Resource Group: $(DevPlan1ResourceGroup)"
+                  echo "Target SKU: P1V3"
+
+                  az appservice plan update \
+                    --name "$(DevPlan1Name)" \
+                    --resource-group "$(DevPlan1ResourceGroup)" \
+                    --sku "P1V3" \
+                    --set sku.capacity=2
+                
+                  echo "Scaling Dev App Service Plan: $(DevPlan2Name)"
+                  echo "Plan: $(DevPlan2Name)"
+                  echo "Resource Group: $(DevPlan2ResourceGroup)"
+                  echo "Target SKU: S2"
+
+                  az appservice plan update \
+                    --name "$(DevPlan2Name)" \
+                    --resource-group "$(DevPlan2ResourceGroup)" \
+                    --sku "S2" \
+                    --set sku.capacity=1
